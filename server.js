@@ -2,8 +2,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 
 dotenv.config();
 
@@ -26,36 +24,7 @@ db.once('open', () => {
   console.log('Connected to MongoDB');
 });
 
-// User Schema
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    minlength: 3
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    lowercase: true
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-const User = mongoose.model('User', userSchema);
-
-// Task Schema (Updated with userId)
+// Task Schema
 const taskSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -75,11 +44,6 @@ const taskSchema = new mongoose.Schema({
     enum: ['low', 'medium', 'high'],
     default: 'medium'
   },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -92,171 +56,33 @@ const taskSchema = new mongoose.Schema({
 
 const Task = mongoose.model('Task', taskSchema);
 
-// JWT Authentication Middleware
-const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+// Routes
 
-  if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
-  }
-
+// GET all tasks
+app.get('/api/tasks', async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    const user = await User.findById(decoded.userId);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(403).json({ message: 'Invalid token' });
-  }
-};
-
-// Auth Routes
-
-// Register
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { username, email, password } = req.body;
-
-    // Validation
-    if (!username || !email || !password) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' });
-    }
-
-    // Check if user exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { username }] 
-    });
-
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Create user
-    const user = new User({
-      username,
-      email,
-      password: hashedPassword
-    });
-
-    await user.save();
-
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '24h' }
-    );
-
-    res.status(201).json({
-      message: 'User created successfully',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Login
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
-    }
-
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    // Check password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '24h' }
-    );
-
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get current user
-app.get('/api/auth/me', authenticateToken, (req, res) => {
-  res.json({
-    user: {
-      id: req.user._id,
-      username: req.user.username,
-      email: req.user.email
-    }
-  });
-});
-
-// Task Routes (Updated with user authentication)
-
-// GET all tasks for authenticated user
-app.get('/api/tasks', authenticateToken, async (req, res) => {
-  try {
-    const tasks = await Task.find({ userId: req.user._id }).sort({ createdAt: -1 });
+    const tasks = await Task.find().sort({ createdAt: -1 });
     res.json(tasks);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// GET single task for authenticated user
-app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
+// GET single task
+app.get('/api/tasks/:id', async (req, res) => {
   try {
-    const task = await Task.findOne({ 
-      _id: req.params.id, 
-      userId: req.user._id 
-    });
-    
+    const task = await Task.findById(req.params.id);
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
-    
     res.json(task);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// POST create new task for authenticated user
-app.post('/api/tasks', authenticateToken, async (req, res) => {
+// POST create new task
+app.post('/api/tasks', async (req, res) => {
   try {
     const { title, description, priority } = req.body;
     
@@ -267,8 +93,7 @@ app.post('/api/tasks', authenticateToken, async (req, res) => {
     const task = new Task({
       title,
       description,
-      priority,
-      userId: req.user._id
+      priority
     });
 
     const savedTask = await task.save();
@@ -278,13 +103,13 @@ app.post('/api/tasks', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT update task for authenticated user
-app.put('/api/tasks/:id', authenticateToken, async (req, res) => {
+// PUT update task
+app.put('/api/tasks/:id', async (req, res) => {
   try {
     const { title, description, completed, priority } = req.body;
     
-    const task = await Task.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
+    const task = await Task.findByIdAndUpdate(
+      req.params.id,
       {
         title,
         description,
@@ -305,13 +130,10 @@ app.put('/api/tasks/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE task for authenticated user
-app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
+// DELETE task
+app.delete('/api/tasks/:id', async (req, res) => {
   try {
-    const task = await Task.findOneAndDelete({ 
-      _id: req.params.id, 
-      userId: req.user._id 
-    });
+    const task = await Task.findByIdAndDelete(req.params.id);
     
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
